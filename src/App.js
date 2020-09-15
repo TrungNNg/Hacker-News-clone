@@ -1,8 +1,9 @@
-import React from 'react';
-import axios from 'axios';
-import styled from 'styled-components';
+import React, { useState } from "react";
+import axios from "axios";
+import styled from "styled-components";
+import {sortBy} from 'lodash';
 
-const API_ENDPOINT = 'https://hn.algolia.com/api/v1/search?query=';
+const API_ENDPOINT = "https://hn.algolia.com/api/v1/search?query=";
 
 const useSemiPersistentState = (key, initialState) => {
   const [value, setValue] = React.useState(
@@ -18,30 +19,30 @@ const useSemiPersistentState = (key, initialState) => {
 
 const storiesReducer = (state, action) => {
   switch (action.type) {
-    case 'STORIES_FETCH_INIT':
+    case "STORIES_FETCH_INIT":
       return {
         ...state,
         isLoading: true,
         isError: false,
       };
-    case 'STORIES_FETCH_SUCCESS':
+    case "STORIES_FETCH_SUCCESS":
       return {
         ...state,
         isLoading: false,
         isError: false,
         data: action.payload,
       };
-    case 'STORIES_FETCH_FAILURE':
+    case "STORIES_FETCH_FAILURE":
       return {
         ...state,
         isLoading: false,
         isError: true,
       };
-    case 'REMOVE_STORY':
+    case "REMOVE_STORY":
       return {
         ...state,
         data: state.data.filter(
-          story => action.payload.objectID !== story.objectID
+          (story) => action.payload.objectID !== story.objectID
         ),
       };
     default:
@@ -82,7 +83,7 @@ const StyledColumn = styled.span`
     color: inherit;
   }
 
-  width: ${props => props.width};
+  width: ${(props) => props.width};
 `;
 
 const StyledButton = styled.button`
@@ -129,32 +130,28 @@ const StyledInput = styled.input`
 `;
 
 const App = () => {
-  const [searchTerm, setSearchTerm] = useSemiPersistentState(
-    'search',
-    'React'
-  );
+  const [searchTerm, setSearchTerm] = useSemiPersistentState("search", "React");
 
-  const [url, setUrl] = React.useState(
-    `${API_ENDPOINT}${searchTerm}`
-  );
+  const [url, setUrl] = React.useState(`${API_ENDPOINT}${searchTerm}`);
 
-  const [stories, dispatchStories] = React.useReducer(
-    storiesReducer,
-    { data: [], isLoading: false, isError: false }
-  );
+  const [stories, dispatchStories] = React.useReducer(storiesReducer, {
+    data: [],
+    isLoading: false,
+    isError: false,
+  });
 
   const handleFetchStories = React.useCallback(async () => {
-    dispatchStories({ type: 'STORIES_FETCH_INIT' });
+    dispatchStories({ type: "STORIES_FETCH_INIT" });
 
     try {
       const result = await axios.get(url);
 
       dispatchStories({
-        type: 'STORIES_FETCH_SUCCESS',
+        type: "STORIES_FETCH_SUCCESS",
         payload: result.data.hits,
       });
     } catch {
-      dispatchStories({ type: 'STORIES_FETCH_FAILURE' });
+      dispatchStories({ type: "STORIES_FETCH_FAILURE" });
     }
   }, [url]);
 
@@ -162,18 +159,18 @@ const App = () => {
     handleFetchStories();
   }, [handleFetchStories]);
 
-  const handleRemoveStory = item => {
+  const handleRemoveStory = (item) => {
     dispatchStories({
-      type: 'REMOVE_STORY',
+      type: "REMOVE_STORY",
       payload: item,
     });
   };
 
-  const handleSearchInput = event => {
+  const handleSearchInput = (event) => {
     setSearchTerm(event.target.value);
   };
 
-  const handleSearchSubmit = event => {
+  const handleSearchSubmit = (event) => {
     setUrl(`${API_ENDPOINT}${searchTerm}`);
 
     event.preventDefault();
@@ -200,11 +197,7 @@ const App = () => {
   );
 };
 
-const SearchForm = ({
-  searchTerm,
-  onSearchInput,
-  onSearchSubmit,
-}) => (
+const SearchForm = ({ searchTerm, onSearchInput, onSearchSubmit }) => (
   <StyledSearchForm onSubmit={onSearchSubmit}>
     <InputWithLabel
       id="search"
@@ -224,7 +217,7 @@ const SearchForm = ({
 const InputWithLabel = ({
   id,
   value,
-  type = 'text',
+  type = "text",
   onInputChange,
   isFocused,
   children,
@@ -252,14 +245,64 @@ const InputWithLabel = ({
   );
 };
 
-const List = ({ list, onRemoveItem }) =>
-  list.map(item => (
-    <Item
-      key={item.objectID}
-      item={item}
-      onRemoveItem={onRemoveItem}
-    />
-  ));
+const SORTS = {
+  NONE: list => list,
+  TITLE: list => sortBy(list, 'title'),
+  AUTHOR: list => sortBy(list, 'author'),
+  COMMENT: list => sortBy(list, 'num_comments').reverse(),
+  POINT: list => sortBy(list, 'points').reverse(),
+};
+
+const List = ({ list, onRemoveItem }) => {
+  const [sort, setSort] = useState({sortKey: 'NONE', isReverse: false});
+
+  const handleSort = sortKey => {
+    const isReverse = sort.sortKey === sortKey && !sort.isReverse;
+ 
+    setSort({ sortKey, isReverse });
+  };
+ 
+  const sortFunction = SORTS[sort.sortKey];
+  const sortedList = sort.isReverse
+    ? sortFunction(list).reverse()
+    : sortFunction(list);
+
+  return (
+    <div>
+      <div style={{ display: "flex" }}>
+        <span style={{ width: "40%" }}>
+          <button type="button" onClick={() => handleSort("TITLE")}>
+            Title
+          </button>
+        </span>
+        <span style={{ width: "30%" }}>
+          <button type="button" onClick={() => handleSort("AUTHOR")}>
+            Author
+          </button>
+        </span>
+        <span style={{ width: "10%" }}>
+          <button type="button" onClick={() => handleSort("COMMENT")}>
+            Comments
+          </button>
+        </span>
+        <span style={{ width: "10%" }}>
+          <button type="button" onClick={() => handleSort("POINT")}>
+            Points
+          </button>
+        </span>
+        <span style={{ width: "10%" }}>Actions</span>
+      </div>
+
+      {sortedList.map(item => (
+        <Item
+          key={item.objectID}
+          item={item}
+          onRemoveItem={onRemoveItem}
+        />
+      ))}
+    </div>
+  );
+};
 
 const Item = ({ item, onRemoveItem }) => (
   <StyledItem>
@@ -270,10 +313,7 @@ const Item = ({ item, onRemoveItem }) => (
     <StyledColumn width="10%">{item.num_comments}</StyledColumn>
     <StyledColumn width="10%">{item.points}</StyledColumn>
     <StyledColumn width="10%">
-      <StyledButtonSmall
-        type="button"
-        onClick={() => onRemoveItem(item)}
-      >
+      <StyledButtonSmall type="button" onClick={() => onRemoveItem(item)}>
         Dismiss
       </StyledButtonSmall>
     </StyledColumn>
