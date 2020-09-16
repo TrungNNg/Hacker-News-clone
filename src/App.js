@@ -1,16 +1,27 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef, useReducer, useCallback } from "react";
 import axios from "axios";
 import styled from "styled-components";
 import {sortBy} from 'lodash';
 
-const API_ENDPOINT = "https://hn.algolia.com/api/v1/search?query=";
+const API_BASE = 'https://hn.algolia.com/api/v1';
+const API_SEARCH = '/search';
+const PARAM_SEARCH = 'query=';
+const PARAM_PAGE = 'page=';
+ 
+const getUrl = (searchTerm, page) =>
+  `${API_BASE}${API_SEARCH}?${PARAM_SEARCH}${searchTerm}&${PARAM_PAGE}${page}`;
 
+// When it first run it will set or replace a key called 'search' with 'React'.
+// setSearchTerm() function in App() is actualy setValue() function.
+// whenever setSearchTerm() get called, setValue() get called here 
+// which change 'value' which triggle useEffect() to store in localStorage, 
+// the new 'value' get return which update 'searchTerm' in App();
 const useSemiPersistentState = (key, initialState) => {
-  const [value, setValue] = React.useState(
+  const [value, setValue] = useState(
     localStorage.getItem(key) || initialState
   );
 
-  React.useEffect(() => {
+  useEffect(() => {
     localStorage.setItem(key, value);
   }, [value, key]);
 
@@ -30,7 +41,10 @@ const storiesReducer = (state, action) => {
         ...state,
         isLoading: false,
         isError: false,
-        data: action.payload,
+        data:
+          action.payload.page === 0
+            ? action.payload.list
+            : state.data.concat(action.payload.list),
       };
     case "STORIES_FETCH_FAILURE":
       return {
@@ -129,33 +143,66 @@ const StyledInput = styled.input`
   font-size: 24px;
 `;
 
+// trim the string until only the search term.
+const extractSearchTerm = url =>
+  url
+    .substring(url.lastIndexOf('?') + 1, url.lastIndexOf('&'))
+    .replace(PARAM_SEARCH, '');
+
+// Recieve an urls array and map it with extractSearchTeam function.
+// can make more consice:    => urls.slice(-5).map(extractSearchTerm);
+// The extractSeachTerm take in whatever item in array and use it as argument.
+// reduce urls array to array that eliminate duplicate.
+const getLastSearches = urls =>
+  urls
+    .reduce((result, url, index) => {
+      const searchTerm = extractSearchTerm(url);
+ 
+      if (index === 0) {
+        return result.concat(searchTerm);
+      }
+ 
+      const previousSearchTerm = result[result.length - 1];
+ 
+      if (searchTerm === previousSearchTerm) {
+        return result;
+      } else {
+        return result.concat(searchTerm);
+      }
+    }, [])
+    .slice(-6)
+    .slice(0, -1);
+
 const App = () => {
   const [searchTerm, setSearchTerm] = useSemiPersistentState("search", "React");
 
-  const [url, setUrl] = React.useState(`${API_ENDPOINT}${searchTerm}`);
+  const [urls, setUrls] = useState([getUrl(searchTerm, 0)]);
 
-  const [stories, dispatchStories] = React.useReducer(storiesReducer, {
-    data: [],
-    isLoading: false,
-    isError: false,
-  });
+  const [stories, dispatchStories] = React.useReducer(
+    storiesReducer,
+    { data: [], page: 0, isLoading: false, isError: false }
+  );
 
   const handleFetchStories = React.useCallback(async () => {
     dispatchStories({ type: "STORIES_FETCH_INIT" });
 
     try {
-      const result = await axios.get(url);
+      const lastUrl = urls[urls.length -1];      // take the last url entry from urls array state.
+      const result = await axios.get(lastUrl);
 
       dispatchStories({
         type: "STORIES_FETCH_SUCCESS",
-        payload: result.data.hits,
+        payload: {
+          list: result.data.hits,
+          page: result.data.page,
+        },
       });
     } catch {
       dispatchStories({ type: "STORIES_FETCH_FAILURE" });
     }
-  }, [url]);
+  }, [urls]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     handleFetchStories();
   }, [handleFetchStories]);
 
@@ -170,11 +217,33 @@ const App = () => {
     setSearchTerm(event.target.value);
   };
 
+  // pass in the urls array to getLastSearches() then store the value in lastSearches.
+  // base on getLastSearches() implementation, lastSearches will store an array of [searchTerm]
+  const lastSearches = getLastSearches(urls);
+
+  // every time user submit search, url is set and put into urls array
   const handleSearchSubmit = (event) => {
-    setUrl(`${API_ENDPOINT}${searchTerm}`);
+    handleSearch(searchTerm, 0);
 
     event.preventDefault();
   };
+
+  const handleLastSearch = searchTerm => {
+    setSearchTerm(searchTerm);
+    handleSearch(searchTerm, 0);
+  }
+
+  const handleSearch = (searchTerm, page) => {
+    const url = getUrl(searchTerm, page);
+    setUrls(urls.concat(url));
+  };
+
+  const handleMore = () => {
+    const lastUrl = urls[urls.length - 1];
+    const searchTerm = extractSearchTerm(lastUrl);
+    handleSearch(searchTerm, stories.page + 1);
+  };
+
 
   return (
     <StyledContainer>
@@ -186,16 +255,40 @@ const App = () => {
         onSearchSubmit={handleSearchSubmit}
       />
 
+      <LastSearches
+        lastSearches={lastSearches}
+        onLastSearch={handleLastSearch}
+      />
+
+      <List list={stories.data} onRemoveItem={handleRemoveStory} />
+
       {stories.isError && <p>Something went wrong ...</p>}
 
       {stories.isLoading ? (
         <p>Loading ...</p>
       ) : (
-        <List list={stories.data} onRemoveItem={handleRemoveStory} />
+        <button type="button" onClick={handleMore}>
+          More
+        </button>
       )}
     </StyledContainer>
   );
 };
+
+const LastSearches = ({ lastSearches, onLastSearch }) => (
+  <div style={{marginBottom: '7px'}}>
+    <p>Your previous search: </p>
+    {lastSearches.map((searchTerm, index) => (
+      <button
+        key={searchTerm + index}
+        type="button"
+        onClick={() => onLastSearch(searchTerm)}
+      >
+        {searchTerm}
+      </button>
+    ))}
+  </div>
+);
 
 const SearchForm = ({ searchTerm, onSearchInput, onSearchSubmit }) => (
   <StyledSearchForm onSubmit={onSearchSubmit}>
